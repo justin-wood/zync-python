@@ -57,7 +57,13 @@ class HTTPBackend(object):
         """
         """
         self.url = ZYNC_URL
-        self.http = zync_lib.httplib2.Http(timeout=timeout) 
+        if PROXY:
+            self.proxy = zync_lib.httplib2.ProxyInfo(proxy_type=socks.PROXY_TYPE_HTTP,
+                                                proxy_host=PROXY['host'], proxy_port=PROXY['port'],
+                                                proxy_user=PROXY['user'],proxy_pass=PROXY['pass'])
+        else:
+            self.proxy = None
+        self.http = zync_lib.httplib2.Http(timeout=timeout, proxy_info=self.proxy) 
         self.script_name = script_name
         self.token = token
         if self.up():
