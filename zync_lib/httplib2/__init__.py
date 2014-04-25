@@ -43,6 +43,7 @@ import calendar
 import time
 import random
 import errno
+from pprint import pprint
 try:
     from hashlib import sha1 as _sha, md5 as _md5
 except ImportError:
@@ -273,7 +274,7 @@ USE_WWW_AUTH_STRICT_PARSING = 0
 #    "(?:[^\0-\x08\x0A-\x1f\x7f-\xff\\\"]|\\[\0-\x7f])*?"    matches a "quoted-string" as defined by HTTP, when LWS have already been replaced by a single space
 # Actually, as an auth-param value can be either a token or a quoted-string, they are combined in a single pattern which matches both:
 #    \"?((?<=\")(?:[^\0-\x1f\x7f-\xff\\\"]|\\[\0-\x7f])*?(?=\")|(?<!\")[^\0-\x08\x0A-\x1f\x7f-\xff()<>@,;:\\\"/[\]?={} \t]+(?!\"))\"?
-WWW_AUTH_STRICT = re.compile(r"^(?:\s*(?:,\s*)?([^\0-\x1f\x7f-\xff()<>@,;:\\\"/[\]?={} \t]+)\s*=\s*\"?((?<=\")(?:[^\0-\x08\x0A-\x1f\x7f-\xff\\\"]|\\[\0-\x7f])*?(?=\")|(?<!\")[^\0-\x1f\x7f-\xff()<>@,;:\\\"/[\]?={} \t]+(?!\"))\"?)(.*)$")
+#WWW_AUTH_STRICT = re.compile(r"^(?:\s*(?:,\s*)?([^\0-\x1f\x7f-\xff()<>@,;:\\\"/[\]?={} \t]+)\s*=\s*\"?((?<=\")(?:[^\0-\x08\x0A-\x1f\x7f-\xff\\\"]|\\[\0-\x7f])*?(?=\")|(?<!\")[^\0-\x1f\x7f-\xff()<>@,;:\\\"/[\]?={} \t]+(?!\"))\"?)(.*)$")
 WWW_AUTH_RELAXED = re.compile(r"^(?:\s*(?:,\s*)?([^ \t\r\n=]+)\s*=\s*\"?((?<=\")(?:[^\\\"]|\\.)*?(?=\")|(?<!\")[^ \t\r\n,]+(?!\"))\"?)(.*)$")
 UNQUOTE_PAIRS = re.compile(r'\\(.)')
 def _parse_www_authenticate(headers, headername='www-authenticate'):
@@ -452,7 +453,7 @@ def _wsse_username_token(cnonce, iso_now, password):
 # how close to the 'top' it is.
 
 class Authentication(object):
-    def __init__(self, credentials, host, request_uri, headers, response, content, http):
+    def __init__(self, credentials, host, request_uri, headers, response, content, http, headername='www-authenticate'):
         (scheme, authority, path, query, fragment) = parse_uri(request_uri)
         self.path = path
         self.host = host
@@ -486,8 +487,8 @@ class Authentication(object):
 
 
 class BasicAuthentication(Authentication):
-    def __init__(self, credentials, host, request_uri, headers, response, content, http):
-        Authentication.__init__(self, credentials, host, request_uri, headers, response, content, http)
+    def __init__(self, credentials, host, request_uri, headers, response, content, http, headername='www-authenticate'):
+        Authentication.__init__(self, credentials, host, request_uri, headers, response, content, http, headername)
 
     def request(self, method, request_uri, headers, content):
         """Modify the request headers to add the appropriate
@@ -498,9 +499,9 @@ class BasicAuthentication(Authentication):
 class DigestAuthentication(Authentication):
     """Only do qop='auth' and MD5, since that
     is all Apache currently implements"""
-    def __init__(self, credentials, host, request_uri, headers, response, content, http):
-        Authentication.__init__(self, credentials, host, request_uri, headers, response, content, http)
-        challenge = _parse_www_authenticate(response, 'www-authenticate')
+    def __init__(self, credentials, host, request_uri, headers, response, content, http, headername='www-authenticate'):
+        Authentication.__init__(self, credentials, host, request_uri, headers, response, content, http, headername)
+        challenge = _parse_www_authenticate(response, headername)
         self.challenge = challenge['digest']
         qop = self.challenge.get('qop', 'auth')
         self.challenge['qop'] = ('auth' in [x.strip() for x in qop.split()]) and 'auth' or None
@@ -558,9 +559,9 @@ class HmacDigestAuthentication(Authentication):
     """Adapted from Robert Sayre's code and DigestAuthentication above."""
     __author__ = "Thomas Broyer (t.broyer@ltgt.net)"
 
-    def __init__(self, credentials, host, request_uri, headers, response, content, http):
-        Authentication.__init__(self, credentials, host, request_uri, headers, response, content, http)
-        challenge = _parse_www_authenticate(response, 'www-authenticate')
+    def __init__(self, credentials, host, request_uri, headers, response, content, http, headername='www-authenticate'):
+        Authentication.__init__(self, credentials, host, request_uri, headers, response, content, http, headername)
+        challenge = _parse_www_authenticate(response, headername)
         self.challenge = challenge['hmacdigest']
         # TODO: self.challenge['domain']
         self.challenge['reason'] = self.challenge.get('reason', 'unauthorized')
@@ -610,7 +611,7 @@ class HmacDigestAuthentication(Authentication):
                 )
 
     def response(self, response, content):
-        challenge = _parse_www_authenticate(response, 'www-authenticate').get('hmacdigest', {})
+        challenge = _parse_www_authenticate(response, headername).get('hmacdigest', {})
         if challenge.get('reason') in ['integrity', 'stale']:
             return True
         return False
@@ -624,8 +625,8 @@ class WsseAuthentication(Authentication):
     TypePad has implemented it wrong, by never issuing a 401
     challenge but instead requiring your client to telepathically know that
     their endpoint is expecting WSSE profile="UsernameToken"."""
-    def __init__(self, credentials, host, request_uri, headers, response, content, http):
-        Authentication.__init__(self, credentials, host, request_uri, headers, response, content, http)
+    def __init__(self, credentials, host, request_uri, headers, response, content, http, headername='www-authenticate'):
+        Authentication.__init__(self, credentials, host, request_uri, headers, response, content, http, headername)
 
     def request(self, method, request_uri, headers, content):
         """Modify the request headers to add the appropriate
@@ -641,10 +642,10 @@ class WsseAuthentication(Authentication):
                 iso_now)
 
 class GoogleLoginAuthentication(Authentication):
-    def __init__(self, credentials, host, request_uri, headers, response, content, http):
+    def __init__(self, credentials, host, request_uri, headers, response, content, http, headername='www-authenticate'):
         from urllib import urlencode
-        Authentication.__init__(self, credentials, host, request_uri, headers, response, content, http)
-        challenge = _parse_www_authenticate(response, 'www-authenticate')
+        Authentication.__init__(self, credentials, host, request_uri, headers, response, content, http, headername)
+        challenge = _parse_www_authenticate(response, headername)
         service = challenge['googlelogin'].get('service', 'xapi')
         # Bloggger actually returns the service in the challenge
         # For the rest we guess based on the URI
@@ -865,7 +866,10 @@ class HTTPConnectionWithTimeout(httplib.HTTPConnection):
             af, socktype, proto, canonname, sa = res
             try:
                 if self.proxy_info and self.proxy_info.isgood():
-                    self.sock = socks.socksocket(af, socktype, proto)
+                    if self.proxy_info.proxy_type == 3:
+                        self.sock = ProxySocket(af, socktype, proto)
+                    else:
+                        self.sock = socks.socksocket(af, socktype, proto)
                     self.sock.setproxy(*self.proxy_info.astuple())
                 else:
                     self.sock = socket.socket(af, socktype, proto)
@@ -876,8 +880,8 @@ class HTTPConnectionWithTimeout(httplib.HTTPConnection):
                     # End of difference from httplib.
                 if self.debuglevel > 0:
                     print "connect: (%s, %s)" % (self.host, self.port)
-
                 self.sock.connect((self.host, self.port) + sa[2:])
+
             except socket.error, msg:
                 if self.debuglevel > 0:
                     print 'connect fail:', (self.host, self.port)
@@ -970,12 +974,14 @@ class HTTPSConnectionWithTimeout(httplib.HTTPSConnection):
             self.host, self.port, 0, socket.SOCK_STREAM):
             try:
                 if self.proxy_info and self.proxy_info.isgood():
-                    sock = socks.socksocket(family, socktype, proto)
+                    if self.proxy_info.proxy_type == 3:
+                        sock = ProxySocket(family, socktype, proto)
+                    else:
+                        sock = socks.socksocket(family, socktype, proto)
                     sock.setproxy(*self.proxy_info.astuple())
                 else:
                     sock = socket.socket(family, socktype, proto)
                     sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-
                 if has_timeout(self.timeout):
                     sock.settimeout(self.timeout)
                 sock.connect((self.host, self.port))
@@ -1076,11 +1082,11 @@ try:
         self.response['status'] = str(response.status_code)
         self.response.status = response.status_code
         setattr(self.response, 'read', lambda : response.content)
-
       # Make sure the exceptions raised match the exceptions expected.
       except InvalidURLError:
         raise socket.gaierror('')
       except (DownloadError, ResponseTooLargeError, SSLCertificateError):
+
         raise httplib.HTTPException()
 
     def getresponse(self):
@@ -1173,6 +1179,9 @@ and more.
 
         # Name/password
         self.credentials = Credentials()
+        #if self.proxy_info:
+        #    self.credentials.add(self.proxy_info.proxy_user, self.proxy_info.proxy_pass,
+        #                         domain=self.proxy_info.proxy_host)
 
         # Key/cert
         self.certificates = KeyCerts()
@@ -1197,15 +1206,15 @@ and more.
 
         self.timeout = timeout
 
-    def _auth_from_challenge(self, host, request_uri, headers, response, content):
+    def _auth_from_challenge(self, host, request_uri, headers, response, content, headername='www-authenticate'):
         """A generator that creates Authorization objects
            that can be applied to requests.
         """
-        challenges = _parse_www_authenticate(response, 'www-authenticate')
+        challenges = _parse_www_authenticate(response, headername)
         for cred in self.credentials.iter(host):
             for scheme in AUTH_SCHEME_ORDER:
                 if challenges.has_key(scheme):
-                    yield AUTH_SCHEME_CLASSES[scheme](cred, host, request_uri, headers, response, content, self)
+                    yield AUTH_SCHEME_CLASSES[scheme](cred, host, request_uri, headers, response, content, self, headername)
 
     def add_credentials(self, name, password, domain=""):
         """Add a name and password that will be used
@@ -1227,7 +1236,10 @@ and more.
         for i in range(2):
             try:
                 if conn.sock is None:
-                  conn.connect()
+                    conn.connect()
+                    # if isinstance(conn.sock, ProxySocket):
+                    #     if not conn.sock.auth in self.authorizations:
+                    #         self.authorizations.append(conn.sock.auth)
                 conn.request(method, request_uri, body, headers)
             except socket.timeout:
                 raise
@@ -1307,6 +1319,16 @@ and more.
                     self.authorizations.append(authorization)
                     authorization.response(response, body)
                     break
+
+        # if response.status == 407:
+        #     print 'yup'
+        #     for authorization in self._auth_from_challenge(conn.__proxy[1], request_uri, headers, response, content, headername='proxy-authenticate'):
+        #         authorization.request(method, request_uri, headers, body)
+        #         (response, content) = self._conn_request(conn, request_uri, method, body, headers, )
+        #         if response.status != 407:
+        #             self.authorizations.append(authorization)
+        #             authorization.response(response, body)
+        #             break
 
         if (self.follow_all_redirects or (method in ["GET", "HEAD"]) or response.status == 303):
             if self.follow_redirects and response.status in [300, 301, 302, 303, 307]:
@@ -1628,3 +1650,50 @@ class Response(dict):
             return self
         else:
             raise AttributeError, name
+
+class ProxySocket(socket.socket):
+    """Simple wrapper around socket.socket to negotiate httpproxy connections."""
+    def __init__(self, family=socket.AF_INET, type=socket.SOCK_STREAM, proto=0, _sock=None):
+        socket.socket.__init__(self, family, type, proto, _sock)
+        self.credentials = Credentials()
+
+    def setproxy(self, ptype, host, port, rdns, user, ppass):
+        self.__proxy = (ptype, host, port, rdns, user, ppass)
+        self.credentials.add(user, ppass, domain=host)
+
+    def __negotiatehttp(self, destaddr, destport):
+        
+        headers =  ["CONNECT ", destaddr, ":", str(destport), " HTTP/1.1\r\n"]
+        headers += ["Host: ", destaddr, "\r\n\r\n"]
+        
+        self.sendall("".join(headers).encode())
+        response = httplib.HTTPResponse(self)
+        response.begin()
+        r = Response(response)
+        pprint(r)
+        challenges = _parse_www_authenticate(r, headername='proxy-authenticate')
+        for cred in self.credentials.iter(self.__proxy[1]):
+            for challenge in challenges:    
+                if challenge in AUTH_SCHEME_CLASSES:
+                    self.auth = AUTH_SCHEME_CLASSES[challenge](cred, self.__proxy[1], destaddr, r, r, '', self, headername='proxy-authenticate')
+                    self.auth.request('CONNECT', destaddr, r, '')
+                    break
+        self.sendall('\r\n'.join([':'.join([a, r[a]]) for a in r.iterkeys()]).encode())
+        response = httplib.HTTPResponse(self)
+        response.begin()
+        r2 = Response(response)
+        pprint(r2)
+        self.auth.response(r2, '')
+        if r2['status'] != '200':
+            self.close()
+            raise ProxiesUnavailableError()
+
+        self.__proxysockname = ("0.0.0.0", 0)
+        self.__proxypeername = (destaddr, destport)
+
+    def connect(self, destpair):
+        # Do a minimal input check first
+        if (not type(destpair) in (list,tuple)) or (len(destpair) < 2) or (not isinstance(destpair[0], basestring)) or (type(destpair[1]) != int):
+            raise GeneralProxyError((5, _generalerrors[5]))
+        socket.socket.connect(self,(self.__proxy[1], self.__proxy[2]))
+        self.__negotiatehttp(destpair[0], destpair[1])
