@@ -1670,7 +1670,6 @@ class ProxySocket(socket.socket):
         response = httplib.HTTPResponse(self)
         response.begin()
         r = Response(response)
-        pprint(r)
         challenges = _parse_www_authenticate(r, headername='proxy-authenticate')
         for cred in self.credentials.iter(self.__proxy[1]):
             for challenge in challenges:    
@@ -1682,7 +1681,6 @@ class ProxySocket(socket.socket):
         response = httplib.HTTPResponse(self)
         response.begin()
         r2 = Response(response)
-        pprint(r2)
         self.auth.response(r2, '')
         if r2['status'] != '200':
             self.close()
